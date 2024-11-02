@@ -112,7 +112,10 @@ class DinoVisionTransformer(nn.Module):
         self.register_tokens = (
             nn.Parameter(torch.zeros(1, num_register_tokens, embed_dim)) if num_register_tokens else None
         )
-
+        self.num_vpt_tokens = 0
+        self.vpt_tokens = (
+            (nn.Parameter(torch.zeros(1, self.num_vpt_tokens, embed_dim))) if self.num_vpt_tokens else None
+        )
         if drop_path_uniform is True:
             dpr = [drop_path_rate] * depth
         else:
@@ -174,6 +177,8 @@ class DinoVisionTransformer(nn.Module):
         nn.init.normal_(self.cls_token, std=1e-6)
         if self.register_tokens is not None:
             nn.init.normal_(self.register_tokens, std=1e-6)
+        if self.vpt_tokens is not None :
+            nn.init.xavier_uniform_(self.vpt_tokens)
         named_apply(init_weights_vit_timm, self)
 
     def interpolate_pos_encoding(self, x, w, h):
@@ -228,6 +233,15 @@ class DinoVisionTransformer(nn.Module):
                 ),
                 dim=1,
             )
+        if self.vpt_tokens is not None : 
+            x = torch.cat(
+                (
+                    x[:, :1],
+                    self.vpt_tokens.expand(x.shape[0], -1, -1),
+                    x[:, 1:],
+                ),
+                dim=1,
+            )
 
         return x
 
@@ -269,13 +283,16 @@ class DinoVisionTransformer(nn.Module):
             "masks": masks,
         }
 
-    def _get_intermediate_layers_not_chunked(self, x, n=1):
+    def _get_intermediate_layers_not_chunked(self, x, modules, model, n=1):
         x = self.prepare_tokens_with_masks(x)
         # If n is an int, take the n last blocks. If it's a list, take them
         output, total_block_len = [], len(self.blocks)
         blocks_to_take = range(total_block_len - n, total_block_len) if isinstance(n, int) else n
         for i, blk in enumerate(self.blocks):
-            x = blk(x)
+            if (model == "student") & (len(modules) > 0) : 
+                x = blk(x,modules[i], model)
+            else : 
+                x = blk(x,[], model)
             if i in blocks_to_take:
                 output.append(x)
         assert len(output) == len(blocks_to_take), f"only {len(output)} / {len(blocks_to_take)} blocks found"
@@ -298,6 +315,8 @@ class DinoVisionTransformer(nn.Module):
     def get_intermediate_layers(
         self,
         x: torch.Tensor,
+        modules : list,
+        model : str,
         n: Union[int, Sequence] = 1,  # Layers or n last layers to take
         reshape: bool = False,
         return_class_token: bool = False,
@@ -306,11 +325,12 @@ class DinoVisionTransformer(nn.Module):
         if self.chunked_blocks:
             outputs = self._get_intermediate_layers_chunked(x, n)
         else:
-            outputs = self._get_intermediate_layers_not_chunked(x, n)
+            outputs = self._get_intermediate_layers_not_chunked(x, modules, model, n)
         if norm:
             outputs = [self.norm(out) for out in outputs]
         class_tokens = [out[:, 0] for out in outputs]
-        outputs = [out[:, 1 + self.num_register_tokens :] for out in outputs]
+        vpt_tokens = [out[:, 1: 5] for out in outputs]
+        outputs = [out[:, 1 + self.num_register_tokens + self.num_vpt_tokens :] for out in outputs]
         if reshape:
             B, _, w, h = x.shape
             outputs = [
@@ -319,6 +339,9 @@ class DinoVisionTransformer(nn.Module):
             ]
         if return_class_token:
             return tuple(zip(outputs, class_tokens))
+        briyam = False
+        if briyam == True : 
+            return tuple(zip(outputs, class_tokens, vpt_tokens))
         return tuple(outputs)
 
     def forward(self, *args, is_training=False, **kwargs):

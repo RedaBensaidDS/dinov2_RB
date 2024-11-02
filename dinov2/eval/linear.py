@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
-
+sys.path.append("/home/reda95/scratch/dinov2")
 from dinov2.data import SamplerType, make_data_loader, make_dataset
 from dinov2.data.transforms import make_classification_eval_transform, make_classification_train_transform
 import dinov2.distributed as distributed

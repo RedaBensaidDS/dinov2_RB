@@ -9,7 +9,8 @@ import warnings
 
 from torch import Tensor, nn
 import torch.nn.functional as F
-
+import warnings
+warnings.filterwarnings("ignore")
 
 class SwiGLUFFN(nn.Module):
     def __init__(

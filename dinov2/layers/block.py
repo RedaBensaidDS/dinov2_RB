@@ -20,7 +20,8 @@ from .drop_path import DropPath
 from .layer_scale import LayerScale
 from .mlp import Mlp
 
-
+import warnings
+warnings.filterwarnings("ignore")
 logger = logging.getLogger("dinov2")
 
 
@@ -38,7 +39,6 @@ except ImportError:
     XFORMERS_AVAILABLE = False
 
     warnings.warn("xFormers is not available (Block)")
-
 
 class Block(nn.Module):
     def __init__(
@@ -86,9 +86,9 @@ class Block(nn.Module):
 
         self.sample_drop_ratio = drop_path
 
-    def forward(self, x: Tensor) -> Tensor:
-        def attn_residual_func(x: Tensor) -> Tensor:
-            return self.ls1(self.attn(self.norm1(x)))
+    def forward(self, x: Tensor, modules : list, model : str) -> Tensor:
+        def attn_residual_func(x: Tensor, modules : list, model : str) -> Tensor:
+            return self.ls1(self.attn(self.norm1(x), modules, model))
 
         def ffn_residual_func(x: Tensor) -> Tensor:
             return self.ls2(self.mlp(self.norm2(x)))
@@ -109,7 +109,7 @@ class Block(nn.Module):
             x = x + self.drop_path1(attn_residual_func(x))
             x = x + self.drop_path1(ffn_residual_func(x))  # FIXME: drop_path2
         else:
-            x = x + attn_residual_func(x)
+            x = x + attn_residual_func(x, modules, model)
             x = x + ffn_residual_func(x)
         return x
 
@@ -249,9 +249,9 @@ class NestedTensorBlock(Block):
             x = x + ffn_residual_func(x)
             return attn_bias.split(x)
 
-    def forward(self, x_or_x_list):
+    def forward(self, x_or_x_list, modules, model):
         if isinstance(x_or_x_list, Tensor):
-            return super().forward(x_or_x_list)
+            return super().forward(x_or_x_list, modules, model)
         elif isinstance(x_or_x_list, list):
             if not XFORMERS_AVAILABLE:
                 raise AssertionError("xFormers is required for using nested tensors")

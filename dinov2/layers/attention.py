@@ -16,7 +16,8 @@ from torch import nn
 
 
 logger = logging.getLogger("dinov2")
-
+import warnings
+warnings.filterwarnings("ignore")
 
 XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
 try:
@@ -53,10 +54,12 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim, bias=proj_bias)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, modules : list, model : str) -> Tensor:
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-
+        if (model == "student") & (modules != []) : 
+            qkv = (self.qkv(x) + modules(x,"student")).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        else : 
+            qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0] * self.scale, qkv[1], qkv[2]
         attn = q @ k.transpose(-2, -1)
 
@@ -70,11 +73,11 @@ class Attention(nn.Module):
 
 
 class MemEffAttention(Attention):
-    def forward(self, x: Tensor, attn_bias=None) -> Tensor:
+    def forward(self, x: Tensor, modules : list, model :str, attn_bias=None) -> Tensor:
         if not XFORMERS_AVAILABLE:
             if attn_bias is not None:
                 raise AssertionError("xFormers is required for using nested tensors")
-            return super().forward(x)
+            return super().forward(x, modules, model)
 
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
